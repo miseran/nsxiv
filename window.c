@@ -75,12 +75,11 @@ void xft_alloc_color(const win_env_t *e, const char *name, XftColor *col)
 }
 #endif /* HAVE_LIBFONTS */
 
-void win_alloc_color(const win_env_t *e, const char *name, unsigned long *pixel)
+void win_alloc_color(const win_env_t *e, const char *name, XColor *col)
 {
-	XColor screen, exact;
-	if (!XAllocNamedColor(e->dpy, e->cmap, name, &screen, &exact))
+	XColor screen;
+	if (!XAllocNamedColor(e->dpy, e->cmap, name, &screen, col))
 		error(EXIT_FAILURE, 0, "Error allocating color '%s'", name);
-	*pixel = exact.pixel;
 }
 
 const char* win_res(XrmDatabase db, const char *name, const char *def)
@@ -110,9 +109,6 @@ void win_init(win_t *win)
 #endif
 	char *res_man;
 	XrmDatabase db;
-	XVisualInfo vis;
-	XWindowAttributes attr;
-	Window parent;
 
 	memset(win, 0, sizeof(win_t));
 
@@ -124,18 +120,9 @@ void win_init(win_t *win)
 	e->scrw = DisplayWidth(e->dpy, e->scr);
 	e->scrh = DisplayHeight(e->dpy, e->scr);
 
-	parent = options->embed != 0 ? options->embed : RootWindow(e->dpy, e->scr);
-
-	if (options->embed == 0) {
-		e->depth = DefaultDepth(e->dpy, e->scr);
-	} else {
-		XGetWindowAttributes(e->dpy, parent, &attr);
-		e->depth = attr.depth;
-	}
-
-	XMatchVisualInfo(e->dpy, e->scr, e->depth, TrueColor, &vis);
-	e->vis = vis.visual;
-	e->cmap = XCreateColormap(e->dpy, parent, e->vis, None);
+	e->depth = DefaultDepth(e->dpy, e->scr);
+	e->vis = DefaultVisual(e->dpy, e->scr);
+	e->cmap = DefaultColormap(e->dpy, e->scr);
 
 	if (setlocale(LC_CTYPE, "") == NULL || XSupportsLocale() == 0)
 		error(0, 0, "No locale support");
@@ -195,6 +182,7 @@ void win_open(win_t *win)
 	XWMHints hints;
 	pid_t pid;
 	char hostname[255];
+	XSetWindowAttributes attrs;
 
 	e = &win->env;
 	parent = options->embed != 0 ? options->embed : RootWindow(e->dpy, e->scr);
@@ -236,9 +224,14 @@ void win_open(win_t *win)
 		win->y = 0;
 	}
 
+	attrs.colormap = e->cmap;
+	attrs.background_pixel = 0;
+	attrs.border_pixel = 0;
+
 	win->xwin = XCreateWindow(e->dpy, parent,
 	                          win->x, win->y, win->w, win->h, 0,
-	                          e->depth, InputOutput, e->vis, 0, NULL);
+	                          e->depth, InputOutput, e->vis,
+	                          CWBackPixel | CWColormap | CWBorderPixel, &attrs);
 	if (win->xwin == None)
 		error(EXIT_FAILURE, 0, "Error creating X window");
 
@@ -322,7 +315,7 @@ void win_open(win_t *win)
 	win->buf.h = e->scrh;
 	win->buf.pm = XCreatePixmap(e->dpy, win->xwin,
 	                            win->buf.w, win->buf.h, e->depth);
-	XSetForeground(e->dpy, gc, win->win_bg);
+	XSetForeground(e->dpy, gc, win->win_bg.pixel);
 	XFillRectangle(e->dpy, win->buf.pm, gc, 0, 0, win->buf.w, win->buf.h);
 	XSetWindowBackgroundPixmap(e->dpy, win->xwin, win->buf.pm);
 
@@ -404,7 +397,7 @@ void win_clear(win_t *win)
 		win->buf.pm = XCreatePixmap(e->dpy, win->xwin,
 		                            win->buf.w, win->buf.h, e->depth);
 	}
-	XSetForeground(e->dpy, gc, win->win_bg);
+	XSetForeground(e->dpy, gc, win->win_bg.pixel);
 	XFillRectangle(e->dpy, win->buf.pm, gc, 0, 0, win->buf.w, win->buf.h);
 }
 
@@ -465,7 +458,7 @@ void win_draw_bar(win_t *win)
 	XSetForeground(e->dpy, gc, win->bar_bg.pixel);
 	XFillRectangle(e->dpy, win->buf.pm, gc, 0, win->h, win->w, win->bar.h);
 
-	XSetForeground(e->dpy, gc, win->win_bg);
+	XSetForeground(e->dpy, gc, win->win_bg.pixel);
 	XSetBackground(e->dpy, gc, win->bar_bg.pixel);
 
 	if ((len = strlen(r->buf)) > 0) {
